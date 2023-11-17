@@ -4,5 +4,5 @@
 3. Подключите систему контроля версий Git ([скачать](https://git-scm.com/)).
 4. Наберите в командной строке Git команды:
     >`cd path` (path - путь к папке)<br />
-    >`git clone https://github.com/Ella-Ksenofontova/leak-finder -c path`
+    >`git clone https://github.com/Ella-Ksenofontova/leak-finder .` Точка означает, что мы клонируем в текущую папку.
 5. Откройте файл *main_window.py*. В правом верхнем углу будет кнопка в виде треугольника. Нажав на неё, вы запустите программу.
