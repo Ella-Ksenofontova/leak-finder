@@ -1,11 +1,11 @@
 from PyQt6.QtWidgets import QApplication, \
     QMainWindow, \
-    QVBoxLayout, \
-    QHBoxLayout, \
     QPushButton, \
     QDoubleSpinBox, \
     QLabel, \
-    QWidget
+    QWidget, \
+    QGridLayout, \
+    QComboBox
 from PyQt6.QtCore import Qt
 
 
@@ -13,76 +13,106 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.left_column = QVBoxLayout()
+        self.sound_speeds = {
+            "Сталь": 5740,
+            "Медь": 4720,
+            "Полиэтилен": 2000,
+            "Полипропилен": 1430,
+            "Поливинилхлорид": 2395
+        }
+        
+        self.screen_layout = QGridLayout()
         self.fill_left_column()
-
-        self.right_column = QVBoxLayout()
         self.fill_right_column()
-
-        self.screen_layout = QHBoxLayout()
-        self.screen_layout.addLayout(self.left_column, stretch=1)
-        self.screen_layout.addLayout(self.right_column, stretch=1)
 
         self.screen = QWidget()
         self.screen.setLayout(self.screen_layout)
+        self.screen.setMaximumHeight(250)
         self.setCentralWidget(self.screen)
 
         self.setWindowTitle("Просмотр данных с датчиков")
-        self.setMaximumSize(800, 200)
+        self.setStyleSheet("background-color: whitesmoke")
 
     def fill_left_column(self):
-        self.add_layout_with_spinboxes()
+        label = QLabel("<h2>Ввод параметров</h2>")
+        label.setStyleSheet("font-weight: 600; color: #033E6B")
+        label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.screen_layout.addWidget(label, 0, 0, 0, 2)
 
         calculation_button = QPushButton("Расчёт")
         calculation_button.setMaximumSize(100, 100)
-        self.left_column.addWidget(calculation_button)
+        calculation_button.setStyleSheet("max-height: 20px;margin-top: 3px; background-color: navy; "
+                                         "border: 1px solid midnigthblue; "
+                                         "color: white; font-weight: bold; font-size:14px")
+        self.screen_layout.addWidget(calculation_button, 5, 0)
+
+        self.add_labels()
+        self.add_spinboxes_and_combobox()
 
         labels_texts = ["Относительно центра: ",
                         "Относительно датчика A: ",
                         "Относительно датчика B: "]
 
-        for label_text in labels_texts:
-            label = QLabel(label_text)
-            self.left_column.addWidget(label, stretch=1)
+        for i in range(len(labels_texts)):
+            label = QLabel(labels_texts[i])
+            label.setStyleSheet("font-size: 14px")
 
-    def add_layout_with_spinboxes(self):
-        spinboxes_and_labels_layout = QHBoxLayout()
+            self.screen_layout.addWidget(label, i + 6, 0)
 
-        labels_layout = QVBoxLayout()
-        sound_speed_label = QLabel("Скорость звука, м/с:")
-        sound_speed_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
-        labels_layout.addWidget(sound_speed_label, stretch=1)
-        distance_label = QLabel("Расстояние между датчиками:")  # Уточнить единицу измерения
-        distance_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
-        labels_layout.addWidget(distance_label, stretch=1)
-        spinboxes_and_labels_layout.addLayout(labels_layout)
+    def add_labels(self):
+        labels_texts = ["Скорость звука, м/с:", "Расстояние между датчиками:", "Диаметр трубы:", "Материал трубы:"]
 
-        spinboxes_layout = QVBoxLayout()
-        sound_speed_spinbox = QDoubleSpinBox()
-        sound_speed_spinbox.setStyleSheet("width: 150px")
-        spinboxes_layout.addWidget(sound_speed_spinbox, stretch=1)
-        spinboxes_and_labels_layout.addLayout(spinboxes_layout, stretch=1)
-        distance_spinbox = QDoubleSpinBox()
-        distance_spinbox.setStyleSheet("width: 150px")
-        spinboxes_layout.addWidget(distance_spinbox, stretch=1)
-        spinboxes_and_labels_layout.addLayout(spinboxes_layout, stretch=1)
+        for i in range(len(labels_texts)):
+            label = QLabel(labels_texts[i])
+            label.setStyleSheet("font-size: 14px")
+            self.screen_layout.addWidget(label, i + 1, 0)
 
-        self.left_column.addLayout(spinboxes_and_labels_layout)
+    def add_spinboxes_and_combobox(self):
+        identifiers = ["soundSpeedSpinBox", "distanceSpinBox", "diameterSpinBox"]
+
+        for i in range(3):
+            spinbox = QDoubleSpinBox()
+            spinbox.setObjectName(identifiers[i])
+            spinbox.setStyleSheet("margin-right: 20px; min-width: 150px; max-width: 200px;"
+                                  "background-color: white; font-size: 14px")
+            spinbox.setMaximum(100000)
+            self.screen_layout.addWidget(spinbox, i + 1, 1)
+
+        material_combobox = QComboBox()
+        material_combobox.addItems(["Выберите материал...", "Сталь", "Медь", "Полиэтилен", "Полипропилен",
+                                    "Поливинилхлорид"])
+        material_combobox.setStyleSheet("max-width: 165px; background-color: white; border: 1px solid gainsboro")
+        material_combobox.currentTextChanged.connect(self.change_sound_speed)
+        self.screen_layout.addWidget(material_combobox, 4, 1)
+
+    def change_sound_speed(self, material):
+        spinbox_with_sound_speed = self.screen.findChild(QDoubleSpinBox, "soundSpeedSpinBox")
+        if material in self.sound_speeds:
+            spinbox_with_sound_speed.setValue(self.sound_speeds[material])
+        else:
+            spinbox_with_sound_speed.setValue(0)
+
 
     def fill_right_column(self):
+        common_label = QLabel("<h2>Графики</h2>")
+        common_label.setStyleSheet("font-weight: 600; color: #033E6B")
+        common_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.screen_layout.addWidget(common_label, 0, 2)
+
         labels_texts = ["График 1 (датчик A)",
                         "График 2 (датчик B)",
                         "Корреляционная функция"]
 
-        for label_text in labels_texts:
-            label = QLabel(label_text)
-            self.right_column.addWidget(label, stretch=1)
-            label.setStyleSheet("font-size: 14px; font-weight: 600")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        for i in range(len(labels_texts)):
+            label = QLabel(f"<h3>{labels_texts[i]}</h3>")
+            label.setAlignment(Qt.AlignmentFlag.AlignTop)
+            label.setStyleSheet("font-weight: 600; color: #033E6B")
+            self.screen_layout.addWidget(label, i * 2 + 1, 2)
 
-            plot = QLabel("Здесь будет график") #Потом нужно будет поменять на график
-            plot.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-            self.right_column.addWidget(plot, stretch=1)
+            plot = QLabel("Здесь будет график")   # Потом нужно будет поменять на график
+            plot.setAlignment(Qt.AlignmentFlag.AlignTop)
+            plot.setStyleSheet("font-size: 14px")
+            self.screen_layout.addWidget(plot, i * 2 + 2, 2)
 
 
 app = QApplication([])
