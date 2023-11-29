@@ -33,6 +33,8 @@ class MainWindow(QMainWindow):
         self.central_widget.setMaximumHeight(250)
 
         self.screen_layout = QHBoxLayout()
+        self.screen_layout.setSpacing(0)
+        self.screen_layout.setContentsMargins(0, 0, 0, 0)
         self.add_widgets_to_screen_layout()
 
         self.screen = QWidget()
