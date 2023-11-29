@@ -112,7 +112,6 @@ class MainWindow(QMainWindow):
         else:
             spinbox_with_sound_speed.setValue(0)
 
-
     def fill_right_column(self):
         common_label = QLabel("<h2>Графики</h2>")
         common_label.setStyleSheet("font-weight: 600; color: #033E6B")
