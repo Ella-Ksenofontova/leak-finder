@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QApplication, \
     QVBoxLayout, \
     QToolTip
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QFont
+from PyQt6.QtGui import QIcon, QFont, QCursor
 
 import matplotlib
 from matplotlib.backends.backend_qt5agg import FigureCanvas
@@ -119,6 +119,7 @@ class MainWindow(QMainWindow):
 
         calculation_button = self.central_widget.findChild(QPushButton, "calculationButton")
         calculation_button.setText("Загрузка...")
+        calculation_button.setCursor(Qt.CursorShape.WaitCursor)
         calculation_button.setDisabled(True)
 
         thread = Thread(target=self.perform_slow_calculation, args=(distance, sound_speed))
@@ -156,14 +157,17 @@ class MainWindow(QMainWindow):
         self.change_distances_labels(result_distances)
 
     def change_canvas(self, result_array):
+        self.canvas.axes.clear()
         self.canvas.axes.plot(list(range(len(result_array))), result_array)
         self.right_column_layout.removeWidget(self.canvas)
         self.right_column_layout.addWidget(self.canvas)
+        self.canvas.setToolTip("")
 
     def make_button_available(self):
         calculation_button = self.central_widget.findChild(QPushButton, "calculationButton")
         calculation_button.setDisabled(False)
         calculation_button.setText("Расчёт") 
+        calculation_button.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def change_distances_labels(self, result_distances):
         labels_texts = ["Относительно центра: ",
@@ -242,6 +246,7 @@ class MainWindow(QMainWindow):
         label.setAlignment(Qt.AlignmentFlag.AlignTop)
         label.setStyleSheet("font-weight: 600; color: #033E6B")
         self.right_column_layout.addWidget(label)
+        self.canvas.setToolTip("Здесь будет график")
         self.right_column_layout.addWidget(self.canvas)
 
 
