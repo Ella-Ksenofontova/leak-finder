@@ -9,8 +9,9 @@ from PyQt6.QtWidgets import QApplication, \
     QHBoxLayout,\
     QVBoxLayout, \
     QToolTip,\
-    QFileDialog
-from PyQt6.QtCore import Qt
+    QFileDialog, \
+    QMessageBox
+from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QIcon, QFont
 
 import matplotlib 
@@ -29,6 +30,9 @@ lib = ctypes.CDLL("./Kfunc.dll")
 lib.K.argtypes = [ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.c_double, ctypes.c_double]
 lib.K.restype = ctypes.POINTER(ctypes.c_double)
 
+class CalculationFinishedSignal(QObject):
+    calculation_finished = pyqtSignal()
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -41,7 +45,10 @@ class MainWindow(QMainWindow):
             "Поливинилхлорид": 2395
         }
 
-        self.file_name = None
+        self.file_names = None
+        self.calculation_success = None
+        self.signal = CalculationFinishedSignal()
+        self.signal.calculation_finished.connect(self.handle_end_of_calculation)
         
         self.central_widget_layout = QGridLayout()
         self.central_widget_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -67,7 +74,7 @@ class MainWindow(QMainWindow):
         
         self.setCentralWidget(self.screen)
 
-        self.setWindowTitle("Просмотр данных с датчиков")
+        self.setWindowTitle("Просмотр результатов вычислений корреляционной функции")
         self.setStyleSheet("background-color: whitesmoke")
         self.setWindowIcon(QIcon("settings.png"))
 
@@ -126,39 +133,86 @@ class MainWindow(QMainWindow):
         thread = Thread(target=self.perform_slow_calculation, args=(distance, sound_speed))
         thread.start()
 
-    def make_array(self, shift, array_length, values):
-        array_b = []
-        index = shift
-        while len(array_b)  < array_length:
-            if index > len(values) - 1:
-                index = 0
-            
-            array_b.append(values[index])
+    def perform_slow_calculation(self, distance, sound_speed):
+        array_1 = []
+        array_2 = []
 
-            index += 1
+        self.calculation_success = None
 
-        return array_b
+        with open(self.file_names[0]) as values_1:
+            for n in values_1:
+                try:
+                    n = float(n)
+                    array_1.append(n)
+                except ValueError:
+                    self.calculation_success = 0
+                    break
 
-    def perform_slow_calculation(self, distance, sound_speed, file_name=""):
-        array_length = ceil(distance / sound_speed * 9600)
-        values = [uniform(1.0, 5.0) for i in range(array_length)]
-        with open("./signals.txt", "w") as signals:
-            for i in values:
-                signals.write(f"{i}\n")
-        array_b =  self.make_array(0, ceil(array_length * 3.5), values)
-        array_c =  self.make_array(-500, ceil(array_length * 3.5), array_b)
+        with open(self.file_names[1]) as values_2:
+            for n in values_2:
+                try:
+                    n = float(n)
+                    array_2.append(n)
+                except ValueError:
+                    self.calculation_success = 0
+                    break
 
-        array_b = (ctypes.c_double * ceil(array_length * 3.5))(*array_b)
-        array_c = (ctypes.c_double * ceil(array_length * 3.5))(*array_c)
+        if self.calculation_success != 0:
+            self.calculation_success = 1
 
-        result_ptr = lib.K(array_b, array_c, sound_speed, distance)
-        result_double_array = ctypes.cast(result_ptr, ctypes.POINTER(ctypes.c_double * ceil(array_length))).contents
-        result_array = list(result_double_array)
-        result_distances = self.calculate_distances(result_array, distance, sound_speed)
+            min_length = min(len(array_1), len(array_2))
 
-        self.change_canvas(result_array)
+            array_1 = (ctypes.c_double * min_length)(*array_1[0:min_length])
+            array_2 = (ctypes.c_double * min_length)(*array_2[0:min_length])
+
+            result_ptr = lib.K(array_1, array_2, sound_speed, distance)
+            result_double_array = ctypes.cast(result_ptr, ctypes.POINTER(ctypes.c_double * min_length)).contents
+            result_array = list(result_double_array)
+            result_distances = self.calculate_distances(result_array, distance, sound_speed)
+            self.change_canvas(result_array)
+            self.change_distances_labels(result_distances)
+
         self.make_button_available()
-        self.change_distances_labels(result_distances)
+
+    def handle_end_of_calculation(self):
+        if not self.calculation_success:
+            self.show_error()
+            self.clear_all_inputs()
+            self.canvas.axes.clear()
+            self.right_column_layout.removeWidget(self.canvas)
+            self.right_column_layout.addWidget(self.canvas)
+            self.canvas.setToolTip("Здесь будет график")
+
+    def show_error(self):
+        error_dialog = QMessageBox(self)
+        error_dialog.setIcon(QMessageBox.Icon.Critical)
+        error_dialog.setWindowTitle("Ошибка")
+        error_dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+        error_dialog.setText("Произошла ошибка при чтении файла.")
+        error_dialog.setInformativeText("В файле должны быть только дробные числа, после которых стоит знак переноса. Целая часть от дробной должна отделяться точкой.")
+
+        error_dialog.exec()
+
+    def clear_all_inputs(self):
+        identifiers = ["soundSpeedSpinBox", "distanceSpinBox"]
+        for id in identifiers:
+            input = self.central_widget.findChild(QDoubleSpinBox, id)
+            input.setValue(0)
+
+        material_combobox = self.central_widget.findChild(QComboBox, "materialCombobox")
+        material_combobox.setCurrentIndex(0)
+
+        self.central_widget.findChild(QPushButton, "fileChoiceButton").setText("Выберите 2 файла")
+        self.file_names = []
+        self.central_widget.findChild(QLabel, "fileNames").setText("Файлы не выбраны")
+
+        labels_texts = ["Относительно центра: ",
+                        "Относительно датчика A: ",
+                        "Относительно датчика B: "]
+        
+        for i in range(len(labels_texts)):
+            label = self.central_widget.findChild(QLabel, f"distanceLabel{i + 1}")
+            label.setText(labels_texts[i])
 
     def change_canvas(self, result_array):
         self.canvas.axes.clear()
@@ -172,6 +226,8 @@ class MainWindow(QMainWindow):
         calculation_button.setDisabled(False)
         calculation_button.setText("Расчёт") 
         calculation_button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.signal.calculation_finished.emit()
 
     def change_distances_labels(self, result_distances):
         labels_texts = ["Относительно центра: ",
@@ -196,12 +252,13 @@ class MainWindow(QMainWindow):
         for i in range(len(labels_texts)):
             label = QLabel(labels_texts[i])
             label.setStyleSheet("font-size: 14px; width: 200px")
-            self.central_widget_layout.addWidget(label, i + 2, 0)
+            self.central_widget_layout.addWidget(label, i + 2, 0, 1, 2)
 
     def add_inputs(self):
         identifiers = ["soundSpeedSpinBox", "distanceSpinBox"]
 
         self.add_choice_button()
+        self.add_file_names_label()
 
         for i in range(2):
             spinbox = QDoubleSpinBox()
@@ -211,22 +268,27 @@ class MainWindow(QMainWindow):
             spinbox.setMinimum(0)
             spinbox.setMaximum(1000000)
             spinbox.valueChanged.connect(self.change_calc_button_appereance)
-            self.central_widget_layout.addWidget(spinbox, i + 2, 1)
+            self.central_widget_layout.addWidget(spinbox, i + 2, 2)
 
         material_combobox = QComboBox()
+        material_combobox.setObjectName("materialCombobox")
         material_combobox.addItems(["Выберите материал...", "Сталь", "Медь", "Полиэтилен", "Полипропилен",
                                     "Поливинилхлорид"])
         material_combobox.setStyleSheet("max-width: 165px; background-color: white; border: 1px solid gainsboro")
         material_combobox.currentTextChanged.connect(self.change_sound_speed)
-        self.central_widget_layout.addWidget(material_combobox, 4, 1)
+        self.central_widget_layout.addWidget(material_combobox, 4, 2)
 
     def add_choice_button(self):
-        file_choice_button = QPushButton("Выберите файл")
+        file_choice_button = QPushButton("Выберите 2 файла")
         file_choice_button.setObjectName("fileChoiceButton")
-        file_choice_button.setStyleSheet("""QPushButton {max-width: 100px; padding: 5px; color: white; background-color: navy; border: 0; font-weight: bold}""")
+        file_choice_button.setStyleSheet("""QPushButton {max-width: 120px; padding: 5px; color: white; background-color: navy; border: 0; font-weight: bold}""")
         self.central_widget_layout.addWidget(file_choice_button, 1, 0)
-        file_choice_button.clicked.connect(self.open_file_and_record_name)
-        
+        file_choice_button.clicked.connect(self.open_file_and_record_names)
+
+    def add_file_names_label(self):
+        file_names_label = QLabel("Файлы не выбраны")
+        file_names_label.setObjectName("fileNames")
+        self.central_widget_layout.addWidget(file_names_label, 1, 1, 1, 2)        
 
     def check_spinboxes_values(self):
         spinbox_with_sound_speed = self.central_widget.findChild(QDoubleSpinBox, "soundSpeedSpinBox")
@@ -237,7 +299,7 @@ class MainWindow(QMainWindow):
     def change_calc_button_appereance(self):
         result = self.check_spinboxes_values()
         calculation_button = self.findChild(QPushButton, "calculationButton")
-        if result and self.file_name:
+        if result and self.file_names:
             calculation_button.setDisabled(False)
             calculation_button.setToolTip("")
             calculation_button.setStyleSheet("""QPushButton {color: white; background-color: navy; border: 0; font-weight: bold}""")
@@ -247,18 +309,32 @@ class MainWindow(QMainWindow):
                                          QTooltip {background-color: white; color: black; font-weight: normal}""")
             if not result:
                 calculation_button.setToolTip("Введите ненулевые значения расстояния и скорости звука")
-            elif not self.file_name:
-                calculation_button.setToolTip("Выберите файл")
+            elif not self.file_names:
+                calculation_button.setToolTip("Выберите 2 файла")
 
 
-    def open_file_and_record_name(self):
-         file_name = QFileDialog.getOpenFileName(self, "Выбор файла", str(Path.home()), filter="Текстовые файлы (*.txt)")
-         if file_name[0]:
-            self.file_name = file_name[0]
+    def open_file_and_record_names(self):
+         file_names = QFileDialog.getOpenFileNames(self, "Выбор файлов", str(Path.home()), filter="Текстовые файлы (*.txt)")
+         if len(file_names[0]) >= 2:
+            self.file_names = file_names[0][0:2]
+                    
             self.change_calc_button_appereance()
             
             file_choice_button = self.findChild(QPushButton, "fileChoiceButton")
             file_choice_button.setText("Изменить")
+
+            self.show_file_names()
+
+    def show_file_names(self):
+        file_names_labels = self.central_widget.findChild(QLabel, "fileNames")
+        file_names = []
+        for name in self.file_names:
+            name = name[name.rindex("/") + 1:]
+            if len(name) > 19:
+                file_names.append(name[0:11] + "..." + name[-1:-6:-1][-1::-1])
+            else:
+                file_names.append(name)
+        file_names_labels.setText(file_names[0] + "; " + file_names[1])
 
     def change_sound_speed(self, material):
         spinbox_with_sound_speed = self.central_widget.findChild(QDoubleSpinBox, "soundSpeedSpinBox")
