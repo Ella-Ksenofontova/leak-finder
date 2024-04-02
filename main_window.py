@@ -138,6 +138,7 @@ class MainWindow(QMainWindow):
         array_2 = []
 
         self.calculation_success = None
+        self.reason_of_error = None
 
         with open(self.file_names[0]) as values_1:
             for n in values_1:
@@ -155,41 +156,53 @@ class MainWindow(QMainWindow):
                     array_2.append(n)
                 except ValueError:
                     self.calculation_success = 0
+                    self.reason_of_error = "value"
                     break
+                finally:
+                    self.make_button_available()
 
         if self.calculation_success != 0:
             self.calculation_success = 1
+            
+            try:
+                min_length = min(len(array_1), len(array_2))
 
-            min_length = min(len(array_1), len(array_2))
+                array_1 = (ctypes.c_double * min_length)(*array_1[0:min_length])
+                array_2 = (ctypes.c_double * min_length)(*array_2[0:min_length])
 
-            array_1 = (ctypes.c_double * min_length)(*array_1[0:min_length])
-            array_2 = (ctypes.c_double * min_length)(*array_2[0:min_length])
-
-            result_ptr = lib.K(array_1, array_2, sound_speed, distance)
-            result_double_array = ctypes.cast(result_ptr, ctypes.POINTER(ctypes.c_double * min_length)).contents
-            result_array = list(result_double_array)
-            result_distances = self.calculate_distances(result_array, distance, sound_speed)
-            self.change_canvas(result_array)
-            self.change_distances_labels(result_distances)
-
-        self.make_button_available()
+                result_ptr = lib.K(array_1, array_2, sound_speed, distance)
+                result_double_array = ctypes.cast(result_ptr, ctypes.POINTER(ctypes.c_double * min_length)).contents
+                result_array = list(result_double_array)
+                result_distances = self.calculate_distances(result_array, distance, sound_speed)
+                self.change_canvas(result_array)
+                self.change_distances_labels(result_distances)
+            except OSError:
+                self.calculation_success = 0
+                self.reason_of_error = "OS"
+            finally:
+                self.make_button_available()
 
     def handle_end_of_calculation(self):
         if not self.calculation_success:
-            self.show_error()
+            if self.reason_of_error == "value":
+                informative_text = "В файле должны быть только дробные числа, после которых стоит знак переноса. Целая часть от дробной должна отделяться точкой."
+            else:
+                informative_text = "Проверьте правильность данных, записанных в файл."
+
+            self.show_error(main_text="Произошла ошибка при чтении файла.", informative_text=informative_text)
             self.clear_all_inputs()
             self.canvas.axes.clear()
             self.right_column_layout.removeWidget(self.canvas)
             self.right_column_layout.addWidget(self.canvas)
             self.canvas.setToolTip("Здесь будет график")
 
-    def show_error(self):
+    def show_error(self, main_text="", informative_text=""):
         error_dialog = QMessageBox(self)
         error_dialog.setIcon(QMessageBox.Icon.Critical)
         error_dialog.setWindowTitle("Ошибка")
         error_dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
-        error_dialog.setText("Произошла ошибка при чтении файла.")
-        error_dialog.setInformativeText("В файле должны быть только дробные числа, после которых стоит знак переноса. Целая часть от дробной должна отделяться точкой.")
+        error_dialog.setText(main_text)
+        error_dialog.setInformativeText(informative_text)
 
         error_dialog.exec()
 
@@ -216,11 +229,15 @@ class MainWindow(QMainWindow):
 
     def change_canvas(self, result_array):
         self.canvas.axes.clear()
-        self.canvas.axes.plot(list(range(len(result_array))), result_array)
-        self.right_column_layout.removeWidget(self.canvas)
-        self.right_column_layout.addWidget(self.canvas)
-        self.canvas.setToolTip("")
-
+        try:
+            self.canvas.axes.plot(list(range(len(result_array))), result_array)
+            self.canvas.setToolTip("")
+        except OverflowError:
+            self.show_error(main_text="Произошла ошибка при построении графика.", informative_text="Проверьте правильность данных, введённых в файл.")
+        finally:
+            self.right_column_layout.removeWidget(self.canvas)
+            self.right_column_layout.addWidget(self.canvas)
+        
     def make_button_available(self):
         calculation_button = self.central_widget.findChild(QPushButton, "calculationButton")
         calculation_button.setDisabled(False)
