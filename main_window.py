@@ -1,7 +1,9 @@
 from PyQt6.QtWidgets import QApplication, \
     QMainWindow, \
     QPushButton, \
+    QSpinBox, \
     QDoubleSpinBox, \
+    QLineEdit, \
     QLabel, \
     QWidget, \
     QGridLayout, \
@@ -10,7 +12,8 @@ from PyQt6.QtWidgets import QApplication, \
     QVBoxLayout, \
     QToolTip,\
     QFileDialog, \
-    QMessageBox
+    QMessageBox,\
+    QTabWidget
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QIcon, QFont
 
@@ -19,8 +22,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.figure import Figure
 
 import ctypes
-from random import uniform
-from math import ceil
+from arduino import write_signals_in_file
 from threading import Thread
 from pathlib import Path
 
@@ -37,60 +39,85 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.sound_speeds = {
-            "Сталь": 5740,
-            "Медь": 4720,
-            "Полиэтилен": 2000,
-            "Полипропилен": 1430,
-            "Поливинилхлорид": 2395
-        }
+        self.sound_speeds = {"Сталь": 5740, "Медь": 4720, "Полиэтилен": 2000, "Полипропилен": 1430, "Поливинилхлорид": 2395}
+        
+        self.analysing_params = {"file_names": None, "calculation_success": None, "reason_of_error": None}
+        self.input_params = {"com_port_number": None, "dir_path": None, "file_name": None, "duration": None, "start_time": None}
 
-        self.file_names = None
-        self.calculation_success = None
         self.signal = CalculationFinishedSignal()
         self.signal.calculation_finished.connect(self.handle_end_of_calculation)
         
         self.central_widget_layout = QGridLayout()
-        self.central_widget_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.fill_left_column()
-        self.right_column_layout = QVBoxLayout()
-        self.right_column_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.canvas = Canvas()
-        self.fill_right_column()
+        self.adjust_central_widget_layout()
 
         self.central_widget = QWidget()
         self.central_widget.setLayout(self.central_widget_layout)
         self.central_widget.setMaximumHeight(500)
 
-        self.screen_layout = QHBoxLayout()
-        self.screen_layout.setSpacing(0)
-        self.screen_layout.setContentsMargins(0, 0, 0, 0)
-        self.add_widgets_to_screen_layout()
+        self.analysis_screen_layout = QHBoxLayout()
+        self.adjust_analysis_widget_layout()
+
+        self.input_screen_layout = QGridLayout()
+        self.input_screen_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.add_widgets_to_input_screen_layout()
 
         QToolTip.setFont(QFont("sans-serif", 10, 0))
 
-        self.screen = QWidget()
-        self.screen.setLayout(self.screen_layout)
+        self.tabs = QTabWidget()
+        self.add_tabs()
         
-        self.setCentralWidget(self.screen)
+        self.setCentralWidget(self.tabs)
+        self.adjust_window_appereance()
 
-        self.setWindowTitle("Просмотр результатов вычислений корреляционной функции")
+    def adjust_central_widget_layout(self):
+        self.central_widget_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.fill_left_column()
+        self.right_column_layout = QVBoxLayout()
+        self.right_column_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.fill_right_column()
+
+    def adjust_analysis_widget_layout(self):
+        self.analysis_screen_layout.setSpacing(0)
+        self.analysis_screen_layout.setContentsMargins(0, 0, 0, 0)
+        self.add_widgets_to_screen_layout()
+
+    def adjust_window_appereance(self):
+        self.setWindowTitle("Работа с корреляционным течеискателем")
         self.setStyleSheet("background-color: whitesmoke")
         self.setWindowIcon(QIcon("settings.png"))
 
-    def add_widgets_to_screen_layout(self):
+    def add_tabs(self):
+        input_screen = QWidget()
+        layout_with_side_widgets = QHBoxLayout()
+        layout_with_side_widgets.setContentsMargins(0, 0, 0, 0)
+
         side_widget_1 = QWidget()
         side_widget_1.setStyleSheet("background-color: white")
-        self.screen_layout.addWidget(side_widget_1)
-        self.screen_layout.addWidget(self.central_widget, alignment=Qt.AlignmentFlag.AlignTop)
 
-        right_column = QWidget()
-        right_column.setLayout(self.right_column_layout)
-        self.screen_layout.addWidget(right_column)
+        input_central_widget = QWidget()
+        input_central_widget.setMaximumWidth(500)
+        input_central_widget.setLayout(self.input_screen_layout)
 
         side_widget_2 = QWidget()
         side_widget_2.setStyleSheet("background-color: white")
-        self.screen_layout.addWidget(side_widget_2)
+
+        for widget in [side_widget_1, input_central_widget, side_widget_2]:
+            layout_with_side_widgets.addWidget(widget)
+
+        input_screen.setLayout(layout_with_side_widgets)
+        self.tabs.addTab(input_screen, "Запись показаний")
+
+        analysis_screen = QWidget()
+        analysis_screen.setLayout(self.analysis_screen_layout)
+        self.tabs.addTab(analysis_screen, "Анализ показаний")
+
+    def add_widgets_to_screen_layout(self):
+        self.analysis_screen_layout.addWidget(self.central_widget, alignment=Qt.AlignmentFlag.AlignTop)
+
+        right_column = QWidget()
+        right_column.setLayout(self.right_column_layout)
+        self.analysis_screen_layout.addWidget(right_column)
 
     def fill_left_column(self):
         label = QLabel("<h2>Ввод параметров</h2>")
@@ -137,32 +164,33 @@ class MainWindow(QMainWindow):
         array_1 = []
         array_2 = []
 
-        self.calculation_success = None
-        self.reason_of_error = None
+        self.analysing_params["calculation_success"] = None
+        self.self.analysing_params["reason_of_error"] = None
 
-        with open(self.file_names[0]) as values_1:
+        with open(self.analysing_params["file_names"][0]) as values_1:
             for n in values_1:
                 try:
                     n = float(n)
                     array_1.append(n)
                 except ValueError:
-                    self.calculation_success = 0
+                    self.analysing_params["calculation_success"] = 0
+                    self.analysing_params["reason_of_error"] = "value"
                     break
 
-        with open(self.file_names[1]) as values_2:
+        with open(self.analysing_params["file_names"][1]) as values_2:
             for n in values_2:
                 try:
                     n = float(n)
                     array_2.append(n)
                 except ValueError:
-                    self.calculation_success = 0
-                    self.reason_of_error = "value"
+                    self.analysing_params["calculation_success"] = 0
+                    self.analysing_params["reason_of_error"] = "value"
                     break
                 finally:
                     self.make_button_available()
 
-        if self.calculation_success != 0:
-            self.calculation_success = 1
+        if self.analysing_params["calculation_success"] != 0:
+            self.analysing_params["calculation_success"] = 1
             
             try:
                 min_length = min(len(array_1), len(array_2))
@@ -177,14 +205,14 @@ class MainWindow(QMainWindow):
                 self.change_canvas(result_array)
                 self.change_distances_labels(result_distances)
             except OSError:
-                self.calculation_success = 0
-                self.reason_of_error = "OS"
+                self.analysing_params["calculation_success"] = 0
+                self.analysing_params["reason_of_error"] = "OS"
             finally:
                 self.make_button_available()
 
     def handle_end_of_calculation(self):
-        if not self.calculation_success:
-            if self.reason_of_error == "value":
+        if not self.analysing_params["calculation_success"]:
+            if self.analysing_params["reason_of_error"] == "value":
                 informative_text = "В файле должны быть только дробные числа, после которых стоит знак переноса. Целая часть от дробной должна отделяться точкой."
             else:
                 informative_text = "Проверьте правильность данных, записанных в файл."
@@ -216,8 +244,8 @@ class MainWindow(QMainWindow):
         material_combobox.setCurrentIndex(0)
 
         self.central_widget.findChild(QPushButton, "fileChoiceButton").setText("Выберите 2 файла")
-        self.file_names = []
-        self.central_widget.findChild(QLabel, "fileNames").setText("Файлы не выбраны")
+        self.analysing_params["file_names"] = []
+        self.central_widget.findChild(QLabel, "fileName").setText("Файлы не выбраны")
 
         labels_texts = ["Относительно центра: ",
                         "Относительно датчика A: ",
@@ -300,11 +328,11 @@ class MainWindow(QMainWindow):
         file_choice_button.setObjectName("fileChoiceButton")
         file_choice_button.setStyleSheet("""QPushButton {max-width: 120px; padding: 5px; color: white; background-color: navy; border: 0; font-weight: bold}""")
         self.central_widget_layout.addWidget(file_choice_button, 1, 0)
-        file_choice_button.clicked.connect(self.open_file_and_record_names)
+        file_choice_button.clicked.connect(self.open_files_and_record_names)
 
     def add_file_names_label(self):
         file_names_label = QLabel("Файлы не выбраны")
-        file_names_label.setObjectName("fileNames")
+        file_names_label.setObjectName("fileName")
         self.central_widget_layout.addWidget(file_names_label, 1, 1, 1, 2)        
 
     def check_spinboxes_values(self):
@@ -316,7 +344,7 @@ class MainWindow(QMainWindow):
     def change_calc_button_appereance(self):
         result = self.check_spinboxes_values()
         calculation_button = self.findChild(QPushButton, "calculationButton")
-        if result and self.file_names:
+        if result and self.analysing_params["file_names"]:
             calculation_button.setDisabled(False)
             calculation_button.setToolTip("")
             calculation_button.setStyleSheet("""QPushButton {color: white; background-color: navy; border: 0; font-weight: bold}""")
@@ -326,15 +354,15 @@ class MainWindow(QMainWindow):
                                          QTooltip {background-color: white; color: black; font-weight: normal}""")
             if not result:
                 calculation_button.setToolTip("Введите ненулевые значения расстояния и скорости звука")
-            elif not self.file_names:
+            elif not self.analysing_params["file_names"]:
                 calculation_button.setToolTip("Выберите 2 файла")
 
 
-    def open_file_and_record_names(self):
+    def open_files_and_record_names(self):
          file_names = QFileDialog.getOpenFileNames(self, "Выбор файлов", str(Path.home()), filter="Текстовые файлы (*.txt)")
-         if len(file_names[0]) >= 2:
-            self.file_names = file_names[0][0:2]
-                    
+         if len(file_names[0]) > 1:
+            self.analysing_params["file_names"] = file_names[0]
+
             self.change_calc_button_appereance()
             
             file_choice_button = self.findChild(QPushButton, "fileChoiceButton")
@@ -343,15 +371,14 @@ class MainWindow(QMainWindow):
             self.show_file_names()
 
     def show_file_names(self):
-        file_names_labels = self.central_widget.findChild(QLabel, "fileNames")
+        file_name_label = self.central_widget.findChild(QLabel, "fileName")
         file_names = []
-        for name in self.file_names:
+        for name in self.analysing_params["file_names"]:
             name = name[name.rindex("/") + 1:]
             if len(name) > 19:
-                file_names.append(name[0:11] + "..." + name[-1:-6:-1][-1::-1])
-            else:
-                file_names.append(name)
-        file_names_labels.setText(file_names[0] + "; " + file_names[1])
+                name = name[0:11] + "..." + name[-1:-6:-1][-1::-1]
+            file_names.append(name)
+        file_name_label.setText(file_names[0] + "; " + file_names[1])
 
     def change_sound_speed(self, material):
         spinbox_with_sound_speed = self.central_widget.findChild(QDoubleSpinBox, "soundSpeedSpinBox")
@@ -368,6 +395,54 @@ class MainWindow(QMainWindow):
         self.canvas.setToolTip("Здесь будет график")
         self.right_column_layout.addWidget(self.canvas)
 
+    def add_widgets_to_input_screen_layout(self):
+        title = QLabel(f"<h2>Настройки записи с датчиков</h2>")
+        title.setStyleSheet("font-weight: 600; color: #033E6B")
+        self.input_screen_layout.addWidget(title, 0, 0, 1, 3)
+
+        labels = ["Номер COM-порта: ",  "Папка, куда будет записан файл: ", "Имя файла: ", "Продолжительность записи: ", "Время запуска: "]
+        for i in range(len(labels)):
+            label = QLabel(labels[i])
+            self.input_screen_layout.addWidget(label, i + 1, 0)
+
+        com_port_spinbox = QSpinBox()
+        com_port_spinbox.setStyleSheet("background-color: white")
+        self.input_screen_layout.addWidget(com_port_spinbox, 1, 1)
+
+        dir_choose_button = QPushButton("Выберите папку")
+        dir_choose_button.setStyleSheet("QPushButton {max-width: 120px; padding: 5px; color: white; background-color: navy; border: 0; font-weight: bold}")
+        self.input_screen_layout.addWidget(dir_choose_button, 2, 1)
+
+        file_name = QLineEdit()
+        file_name.setStyleSheet("QLineEdit {background-color: white; max-width: 150px}")
+        file_name.setMaximumWidth(150)
+        self.input_screen_layout.addWidget(file_name, 3, 1)
+        self.input_screen_layout.addWidget(QLabel(".txt"), 3, 2)
+
+        duration = QSpinBox()
+        duration.setStyleSheet("background-color: white")
+        duration.setSuffix(" сек")
+        self.input_screen_layout.addWidget(duration, 4, 1)
+
+        spinbox_names = ["startHour", "startMinute"]
+        suffixes = [" ч", " мин"]
+        max_values = [23, 59]
+
+        spinboxes_layout = QHBoxLayout()
+        spinboxes_layout.setContentsMargins(0, 0, 0, 0)
+
+        for i in range(len(spinbox_names)):
+            spinbox = QSpinBox()
+            spinbox.setStyleSheet("background-color: white")
+            spinbox.setObjectName(spinbox_names[i])
+            spinbox.setMaximum(max_values[i])
+            spinbox.setSuffix(suffixes[i])
+            
+            spinboxes_layout.addWidget(spinbox)
+
+        spinboxes_wrapper = QWidget()
+        spinboxes_wrapper.setLayout(spinboxes_layout)
+        self.input_screen_layout.addWidget(spinboxes_wrapper, 5, 1, Qt.AlignmentFlag.AlignLeft)
 
 class Canvas(FigureCanvas):
     def __init__(self) -> None:
