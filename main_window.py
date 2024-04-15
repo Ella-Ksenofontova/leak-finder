@@ -419,6 +419,7 @@ class MainWindow(QMainWindow):
 
         com_port_spinbox = QSpinBox()
         com_port_spinbox.setObjectName("COMPortSpinbox")
+        com_port_spinbox.setMaximum(10000)
         com_port_spinbox.setStyleSheet("background-color: white; max-width: 100px")
         self.input_screen_layout.addWidget(com_port_spinbox, 1, 1)
 
@@ -625,7 +626,8 @@ class MainWindow(QMainWindow):
         if not result:
             self.show_error("Не удалось записать данные в файл.", "Проверьте правильность введённых данных, в частности, номер COM-порта.")
         else:
-            self.show_info("Данные успешно записаны в файл.", f"Файл находится в папке <i>{self.input_params["dir_path"]}</i>")
+            dir_path = self.input_params["dir_path"]
+            self.show_info("Данные успешно записаны в файл.", f"Файл находится в папке <i>{dir_path}</i>")
 
         self.dir_button = self.findChild(QPushButton, "dirChooseButton")
         self.dir_button.setText("Выберите папку")
