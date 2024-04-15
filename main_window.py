@@ -22,9 +22,14 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.figure import Figure
 
 import ctypes
-from arduino import write_signals_in_file
 from threading import Thread
+from multiprocessing.pool import ThreadPool
 from pathlib import Path
+import datetime
+import time
+import sched
+
+from arduino import write_signals_in_file
 
 matplotlib.use("Qt5Agg")
 
@@ -42,10 +47,13 @@ class MainWindow(QMainWindow):
         self.sound_speeds = {"Сталь": 5740, "Медь": 4720, "Полиэтилен": 2000, "Полипропилен": 1430, "Поливинилхлорид": 2395}
         
         self.analysing_params = {"file_names": None, "calculation_success": None, "reason_of_error": None}
-        self.input_params = {"com_port_number": None, "dir_path": None, "file_name": None, "duration": None, "start_time": None}
+        self.input_params = {"dir_path": None, "file_name": None, "input_result": None}
 
-        self.signal = CalculationFinishedSignal()
-        self.signal.calculation_finished.connect(self.handle_end_of_calculation)
+        self.analyse_signal = CalculationFinishedSignal()
+        self.analyse_signal.calculation_finished.connect(self.handle_end_of_calculation)
+
+        self.input_signal = CalculationFinishedSignal()
+        self.input_signal.calculation_finished.connect(self.handle_end_of_writing)
         
         self.central_widget_layout = QGridLayout()
         self.canvas = Canvas()
@@ -165,7 +173,7 @@ class MainWindow(QMainWindow):
         array_2 = []
 
         self.analysing_params["calculation_success"] = None
-        self.self.analysing_params["reason_of_error"] = None
+        self.analysing_params["reason_of_error"] = None
 
         with open(self.analysing_params["file_names"][0]) as values_1:
             for n in values_1:
@@ -219,6 +227,10 @@ class MainWindow(QMainWindow):
 
             self.show_error(main_text="Произошла ошибка при чтении файла.", informative_text=informative_text)
             self.clear_all_inputs()
+
+            for key in self.analysing_params:
+                self.analysing_params[key] = None
+
             self.canvas.axes.clear()
             self.right_column_layout.removeWidget(self.canvas)
             self.right_column_layout.addWidget(self.canvas)
@@ -272,7 +284,7 @@ class MainWindow(QMainWindow):
         calculation_button.setText("Расчёт") 
         calculation_button.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        self.signal.calculation_finished.emit()
+        self.analyse_signal.calculation_finished.emit()
 
     def change_distances_labels(self, result_distances):
         labels_texts = ["Относительно центра: ",
@@ -398,7 +410,7 @@ class MainWindow(QMainWindow):
     def add_widgets_to_input_screen_layout(self):
         title = QLabel(f"<h2>Настройки записи с датчиков</h2>")
         title.setStyleSheet("font-weight: 600; color: #033E6B")
-        self.input_screen_layout.addWidget(title, 0, 0, 1, 3)
+        self.input_screen_layout.addWidget(title, 0, 0, 1, 2)
 
         labels = ["Номер COM-порта: ",  "Папка, куда будет записан файл: ", "Имя файла: ", "Продолжительность записи: ", "Время запуска: "]
         for i in range(len(labels)):
@@ -406,24 +418,92 @@ class MainWindow(QMainWindow):
             self.input_screen_layout.addWidget(label, i + 1, 0)
 
         com_port_spinbox = QSpinBox()
-        com_port_spinbox.setStyleSheet("background-color: white")
+        com_port_spinbox.setObjectName("COMPortSpinbox")
+        com_port_spinbox.setStyleSheet("background-color: white; max-width: 100px")
         self.input_screen_layout.addWidget(com_port_spinbox, 1, 1)
+
+        dir_choose_layout = QHBoxLayout()
+        dir_choose_layout.setContentsMargins(0, 0, 0, 0)
+        dir_choose_layout.setSpacing(0)
+
+        dir_name_label = QLabel("Не выбрана")
+        dir_name_label.setObjectName("dirName")
+        dir_choose_layout.addWidget(dir_name_label)
 
         dir_choose_button = QPushButton("Выберите папку")
         dir_choose_button.setStyleSheet("QPushButton {max-width: 120px; padding: 5px; color: white; background-color: navy; border: 0; font-weight: bold}")
-        self.input_screen_layout.addWidget(dir_choose_button, 2, 1)
+        dir_choose_button.setObjectName("dirChooseButton")
+        dir_choose_button.clicked.connect(self.choose_and_record_directory)
+        dir_choose_layout.addWidget(dir_choose_button)
 
-        file_name = QLineEdit()
-        file_name.setStyleSheet("QLineEdit {background-color: white; max-width: 150px}")
-        file_name.setMaximumWidth(150)
-        self.input_screen_layout.addWidget(file_name, 3, 1)
-        self.input_screen_layout.addWidget(QLabel(".txt"), 3, 2)
+        dir_choose = QWidget()
+        dir_choose.setMaximumWidth(200)
+        dir_choose.setLayout(dir_choose_layout)
+        self.input_screen_layout.addWidget(dir_choose, 2, 1)
 
+        self.add_file_name_input()
+        
         duration = QSpinBox()
-        duration.setStyleSheet("background-color: white")
+        duration.setStyleSheet("background-color: white; max-width: 100px")
         duration.setSuffix(" сек")
+        duration.setToolTip("Подходят значения от 5 до 600")
+        duration.setObjectName("duration")
+        duration.setMinimum(5)
+        duration.setMaximum(600)
+        
         self.input_screen_layout.addWidget(duration, 4, 1)
 
+        self.add_spinboxes()
+
+        record_start_button = QPushButton("Начать запись")
+        record_start_button.setObjectName("recordStartButton")
+        record_start_button.setStyleSheet("""QPushButton {color: dimgray; background-color: lightgray; max-width: 100px}
+                                         QTooltip {background-color: white; color: black; font-weight: normal}""")
+        record_start_button.setToolTip("Заполните все поля")
+        record_start_button.setDisabled(True)
+        record_start_button.clicked.connect(self.show_confirmation_and_start_scheduling)
+        self.input_screen_layout.addWidget(record_start_button, 6, 0, 1, 3)
+
+    def write_value(self, param, value):
+        self.input_params[param] = value
+        self.change_state_of_start_button()
+
+    def choose_and_record_directory(self):
+        directory_path = QFileDialog.getExistingDirectory(self, "Выбор папки", str(Path.home()))
+        if directory_path:
+            self.input_params["dir_path"] = directory_path
+            self.change_state_of_start_button()
+            dir_choose_button = self.findChild(QPushButton, "dirChooseButton")
+            if dir_choose_button.text != "Изменить":
+                dir_choose_button.setText("Изменить")
+            dir_choose_button.setStyleSheet("QPushButton {max-width: 80px; padding: 5px; color: white; background-color: navy; border: 0; font-weight: bold}")
+
+            dir_name = directory_path[directory_path.rindex("/") + 1:]
+            if len(dir_name) > 15:
+                dir_name = dir_name[:13] + "..."
+            elif len(dir_name) == 0:
+                dir_name = directory_path[:directory_path.index("/")]
+
+            dir_name_label = self.findChild(QLabel, "dirName")
+            dir_name_label.setText(dir_name)    
+
+    def add_file_name_input(self):
+        file_name_layout = QHBoxLayout()
+        file_name_layout.setContentsMargins(0, 0, 0, 0)
+
+        file_name = QLineEdit()
+        file_name.setObjectName("fileName")
+        file_name.setStyleSheet("QLineEdit {background-color: white; max-width: 150px}")
+        file_name.setMaximumWidth(150)
+        file_name.textChanged.connect(lambda: self.write_value("file_name", file_name.text()))
+        file_name_layout.addWidget(file_name)
+        file_name_layout.addWidget(QLabel(".txt"))
+
+        file_name_widget = QWidget()
+        file_name_widget.setLayout(file_name_layout)
+        self.input_screen_layout.addWidget(file_name_widget, 3, 1)
+
+    def add_spinboxes(self):
         spinbox_names = ["startHour", "startMinute"]
         suffixes = [" ч", " мин"]
         max_values = [23, 59]
@@ -443,6 +523,145 @@ class MainWindow(QMainWindow):
         spinboxes_wrapper = QWidget()
         spinboxes_wrapper.setLayout(spinboxes_layout)
         self.input_screen_layout.addWidget(spinboxes_wrapper, 5, 1, Qt.AlignmentFlag.AlignLeft)
+
+    def find_date(self, hours, minutes):
+        now = datetime.datetime.now()
+
+        days_in_months = {
+            1: 31,
+            3: 31,
+            4: 30,
+            5: 31,
+            6: 30,
+            7: 31,
+            8: 31,
+            9: 30,
+            10: 31,
+            11: 30
+        }
+
+        if now.hour > hours or (now.hour == hours and now.minute > minutes):
+            if now.month == 12 and now.day == 31:
+                return datetime.datetime(now.year + 1, 1, 1, hours, minutes)
+            elif now.month == 2:
+                if (now.day == 29 and now.year % 4 == 0) or (now.day == 28 and now.year % 4 != 0):
+                    return datetime.datetime(now.year, 3, 1, hours, minutes)
+                else:
+                    return datetime.datetime(now.year, now.month, now.day + 1, hours, minutes)
+            else:
+                if now.day == days_in_months[now.month]:
+                   return datetime.datetime(now.year, now.month + 1, 1, hours, minutes)
+                else:
+                    return datetime.datetime(now.year, now.month, now.day + 1, hours, minutes)
+                
+        return datetime.datetime(now.year, now.month, now.day, hours, minutes)
+    
+    def change_state_of_start_button(self):
+        values = [self.input_params[key] for key in self.input_params]
+        record_start_button = self.findChild(QPushButton, "recordStartButton")
+        if all(values[:2]):
+            record_start_button.setStyleSheet("""QPushButton {color: white; background-color: navy; font-weight: bold; max-width: 100px}""")
+            record_start_button.setToolTip("")
+            record_start_button.setDisabled(False)
+        else:
+            record_start_button.setStyleSheet("""QPushButton {color: dimgray; font-weight: normal; background-color: lightgray; max-width: 100px}
+                                         QTooltip {background-color: white; color: black; font-weight: normal}""")
+            record_start_button.setToolTip("Заполните все поля")
+            record_start_button.setDisabled(True)
+
+    def show_confirmation_and_start_scheduling(self):
+        com_port_number = self.findChild(QSpinBox, "COMPortSpinbox").value()
+        duration = self.findChild(QSpinBox, "duration").value()
+        start_hour = self.findChild(QSpinBox, "startHour").value()
+        start_minute = self.findChild(QSpinBox, "startMinute").value()
+
+        date_of_start = self.find_date(start_hour, start_minute)
+        date_string = date_of_start.strftime("%d.%m.%y, %H:%M")
+
+        confirm_pop_up = self.create_confirm_pop_up({"com_port_number": com_port_number, "duration": duration, "date_string": date_string})
+
+        pool = ThreadPool(processes=1)
+        input_params = self.input_params
+        input_signal = self.input_signal
+
+        def get_result_of_writing():
+            async_result = pool.apply_async(write_signals_in_file, [com_port_number, input_params["dir_path"], input_params["file_name"], duration])
+            async_result.wait()
+            input_params["input_result"] = async_result.get()
+            input_signal.calculation_finished.emit()
+
+        schedule = sched.scheduler(time.time, time.sleep)
+        event = schedule.enter((date_of_start - datetime.datetime.now()).total_seconds(), 1, get_result_of_writing)
+
+        thread = Thread(target=self.start_writing, args=[schedule])
+        thread.start()
+        
+        result = confirm_pop_up.exec()
+        if not result and self.input_params["input_result"] == None:
+            pool.close()
+            schedule.cancel(event)
+            self.change_state_of_start_button()
+
+    def create_confirm_pop_up(self, params: dict):
+        confirm_pop_up = QMessageBox(self)
+        confirm_pop_up.setObjectName("confirmPopUp")
+        confirm_pop_up.setIcon(QMessageBox.Icon.Information)
+        confirm_pop_up.setWindowTitle("Подтверждение операции")
+        confirm_pop_up.setStandardButtons(QMessageBox.StandardButton.Ok)
+        confirm_pop_up.addButton("Отменить", QMessageBox.ButtonRole.RejectRole)
+        confirm_pop_up.setText("Потвердите операцию записи:")
+        confirm_pop_up.setInformativeText(f"""<b>Номер COM-порта:</b> {params["com_port_number"]}<br />
+                                            <b>Продожительность записи :</b> {params["duration"]} сек<br />
+                                            <b>Имя файла:</b> {self.input_params["file_name"]}<br />
+                                            <b>Папка, в которой будет находиться файл:</b> {self.input_params["dir_path"]}<br />
+                                            <b>Дата и время начала записи:</b> {params["date_string"]}<br />
+                                            <i>(По наступлении этого времени запись начнётся автоматически, если Вы не закроете программу и не нажмёте кнопку "Отмена")</i>
+                                          """)
+        
+        return confirm_pop_up
+        
+    def handle_end_of_writing(self):
+        result = self.input_params["input_result"]
+        if not result:
+            self.show_error("Не удалось записать данные в файл.", "Проверьте правильность введённых данных, в частности, номер COM-порта.")
+        else:
+            self.show_info("Данные успешно записаны в файл.", f"Файл находится в папке <i>{self.input_params["dir_path"]}</i>")
+
+        self.dir_button = self.findChild(QPushButton, "dirChooseButton")
+        self.dir_button.setText("Выберите папку")
+        self.dir_button.setStyleSheet("QPushButton {max-width: 120px; padding: 5px; color: white; background-color: navy; border: 0; font-weight: bold}")
+        self.findChild(QLabel, "dirName").setText("Не выбрана")
+
+        for name in ["COMPortSpinbox", "startHour", "startMinute"]:
+            self.findChild(QSpinBox, name).setValue(0)
+
+        self.findChild(QSpinBox, "duration").setValue(5)
+        self.findChild(QLineEdit, "fileName").setText("")
+
+        confirm_pop_up = self.findChild(QMessageBox, "confirmPopUp")
+        if confirm_pop_up:
+            confirm_pop_up.close()
+
+        for key in self.input_params:
+            self.input_params[key] = None
+
+    def start_writing(self, schedule):
+        record_start_button = self.findChild(QPushButton, "recordStartButton")
+        record_start_button.setDisabled(True)
+        record_start_button.setStyleSheet("""QPushButton {color: dimgray; font-weight: normal; background-color: lightgray; max-width: 100px}
+                                         QTooltip {background-color: white; color: black; font-weight: normal}""")
+        record_start_button.setToolTip("Дождитесь окончания предыдущей записи")
+        schedule.run()
+
+    def show_info(self, main_text="", informative_text=""):
+        info_box = QMessageBox(self)
+        info_box.setIcon(QMessageBox.Icon.Information)
+        info_box.setText(main_text)
+        info_box.setInformativeText(informative_text)
+        info_box.setWindowTitle("Сообщение")
+        info_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+
+        info_box.exec()
 
 class Canvas(FigureCanvas):
     def __init__(self) -> None:
