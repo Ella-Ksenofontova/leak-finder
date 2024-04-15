@@ -412,7 +412,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-weight: 600; color: #033E6B")
         self.input_screen_layout.addWidget(title, 0, 0, 1, 2)
 
-        labels = ["Номер COM-порта: ",  "Папка, куда будет записан файл: ", "Имя файла: ", "Продолжительность записи: ", "Время запуска: "]
+        labels = ["Номер COM-порта: ",  "Папка, куда будет записан файл: ", "Имя файла: ", "Время запуска: "]
         for i in range(len(labels)):
             label = QLabel(labels[i])
             self.input_screen_layout.addWidget(label, i + 1, 0)
@@ -443,16 +443,6 @@ class MainWindow(QMainWindow):
         self.input_screen_layout.addWidget(dir_choose, 2, 1)
 
         self.add_file_name_input()
-        
-        duration = QSpinBox()
-        duration.setStyleSheet("background-color: white; max-width: 100px")
-        duration.setSuffix(" сек")
-        duration.setToolTip("Подходят значения от 5 до 600")
-        duration.setObjectName("duration")
-        duration.setMinimum(5)
-        duration.setMaximum(600)
-        
-        self.input_screen_layout.addWidget(duration, 4, 1)
 
         self.add_spinboxes()
 
@@ -463,7 +453,7 @@ class MainWindow(QMainWindow):
         record_start_button.setToolTip("Заполните все поля")
         record_start_button.setDisabled(True)
         record_start_button.clicked.connect(self.show_confirmation_and_start_scheduling)
-        self.input_screen_layout.addWidget(record_start_button, 6, 0, 1, 3)
+        self.input_screen_layout.addWidget(record_start_button, 5, 0, 1, 2)
 
     def write_value(self, param, value):
         self.input_params[param] = value
@@ -523,7 +513,7 @@ class MainWindow(QMainWindow):
 
         spinboxes_wrapper = QWidget()
         spinboxes_wrapper.setLayout(spinboxes_layout)
-        self.input_screen_layout.addWidget(spinboxes_wrapper, 5, 1, Qt.AlignmentFlag.AlignLeft)
+        self.input_screen_layout.addWidget(spinboxes_wrapper, 4, 1, Qt.AlignmentFlag.AlignLeft)
 
     def find_date(self, hours, minutes):
         now = datetime.datetime.now()
@@ -572,21 +562,20 @@ class MainWindow(QMainWindow):
 
     def show_confirmation_and_start_scheduling(self):
         com_port_number = self.findChild(QSpinBox, "COMPortSpinbox").value()
-        duration = self.findChild(QSpinBox, "duration").value()
         start_hour = self.findChild(QSpinBox, "startHour").value()
         start_minute = self.findChild(QSpinBox, "startMinute").value()
 
         date_of_start = self.find_date(start_hour, start_minute)
         date_string = date_of_start.strftime("%d.%m.%y, %H:%M")
 
-        confirm_pop_up = self.create_confirm_pop_up({"com_port_number": com_port_number, "duration": duration, "date_string": date_string})
+        confirm_pop_up = self.create_confirm_pop_up({"com_port_number": com_port_number, "duration": 5, "date_string": date_string})
 
         pool = ThreadPool(processes=1)
         input_params = self.input_params
         input_signal = self.input_signal
 
         def get_result_of_writing():
-            async_result = pool.apply_async(write_signals_in_file, [com_port_number, input_params["dir_path"], input_params["file_name"], duration])
+            async_result = pool.apply_async(write_signals_in_file, [com_port_number, input_params["dir_path"], input_params["file_name"]])
             async_result.wait()
             input_params["input_result"] = async_result.get()
             input_signal.calculation_finished.emit()
@@ -637,7 +626,6 @@ class MainWindow(QMainWindow):
         for name in ["COMPortSpinbox", "startHour", "startMinute"]:
             self.findChild(QSpinBox, name).setValue(0)
 
-        self.findChild(QSpinBox, "duration").setValue(5)
         self.findChild(QLineEdit, "fileName").setText("")
 
         confirm_pop_up = self.findChild(QMessageBox, "confirmPopUp")

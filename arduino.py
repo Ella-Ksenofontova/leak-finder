@@ -3,7 +3,7 @@ import time
 
 import serial.serialutil
 
-def write_signals_in_file(com_port, path, file_name, duration=30000):
+def write_signals_in_file(com_port, path, file_name, duration=5):
     success = 1
     try:
         signal = serial.Serial(f"com{com_port}", 9600)
