@@ -3,7 +3,7 @@ import time
 
 import serial.serialutil
 
-def write_signals_in_file(com_port, path, file_name, duration=5):
+def write_signals_in_file(com_port, path, file_name, duration=4):
     success = 1
     try:
         signal = serial.Serial(f"com{com_port}", 9600)
@@ -13,7 +13,6 @@ def write_signals_in_file(com_port, path, file_name, duration=5):
             while time.time() - timestamp < duration:
                 sensor_signal = int(signal.readline())
                 file.write(sensor_signal + "\n")
-                time.sleep(0.1)
     except serial.serialutil.SerialException:
         success = 0
     finally:
