@@ -20,8 +20,6 @@ from PyQt6.QtGui import QIcon, QFont
 import matplotlib 
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.figure import Figure
-
-import ctypes
 from threading import Thread
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
@@ -32,10 +30,6 @@ import sched
 from arduino_imitation import write_signals_in_file
 
 matplotlib.use("Qt5Agg")
-
-lib = ctypes.CDLL("./Kfunc.dll")
-lib.K.argtypes = [ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.c_double, ctypes.c_double]
-lib.K.restype = ctypes.POINTER(ctypes.c_double)
 
 class CalculationFinishedSignal(QObject):
     calculation_finished = pyqtSignal()
@@ -176,14 +170,13 @@ class MainWindow(QMainWindow):
         self.analysing_params["reason_of_error"] = None
 
         with open(self.analysing_params["file_names"][0]) as values_1:
-            for n in values_1:
-                try:
+            try:
+                for n in values_1:
                     n = float(n)
                     array_1.append(n)
-                except ValueError:
-                    self.analysing_params["calculation_success"] = 0
-                    self.analysing_params["reason_of_error"] = "value"
-                    break
+            except ValueError:
+                self.analysing_params["calculation_success"] = 0
+                self.analysing_params["reason_of_error"] = "value"
 
         with open(self.analysing_params["file_names"][1]) as values_2:
             for n in values_2:
@@ -208,24 +201,24 @@ class MainWindow(QMainWindow):
 
         if self.analysing_params["calculation_success"] != 0:
             self.analysing_params["calculation_success"] = 1
+            min_length = min(len(array_1), len(array_2))
+
+            array_1 = array_1[0:min_length]
+            array_2 = array_2[0:min_length]
+
+            shift = find_shift(array_1, array_2)
             
-            try:
-                min_length = min(len(array_1), len(array_2))
-
-                array_1 = (ctypes.c_double * min_length)(*array_1[0:min_length])
-                array_2 = (ctypes.c_double * min_length)(*array_2[0:min_length])
-
-                result_ptr = lib.K(array_1, array_2, sound_speed, distance)
-                result_double_array = ctypes.cast(result_ptr, ctypes.POINTER(ctypes.c_double * min_length)).contents
-                result_array = list(result_double_array)
+            if shift >= 0:
+                result_array = [0 for i in range(min_length)]
+                result_array[shift] = 1
                 result_distances = self.calculate_distances(result_array, distance, sound_speed)
                 self.change_canvas(result_array)
                 self.change_distances_labels(result_distances)
-            except OSError:
+            else:
                 self.analysing_params["calculation_success"] = 0
-                self.analysing_params["reason_of_error"] = "OS"
-            finally:
-                self.make_button_available()
+                self.analysing_params["reason_of_error"] = "incompatible_signals"
+
+            self.make_button_available()
 
     def handle_end_of_calculation(self):
         if not self.analysing_params["calculation_success"]:
