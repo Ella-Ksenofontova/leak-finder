@@ -29,7 +29,7 @@ import datetime
 import time
 import sched
 
-from arduino import write_signals_in_file
+from arduino_imitation import write_signals_in_file
 
 matplotlib.use("Qt5Agg")
 
@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
         self.sound_speeds = {"Сталь": 5740, "Медь": 4720, "Полиэтилен": 2000, "Полипропилен": 1430, "Поливинилхлорид": 2395}
         
         self.analysing_params = {"file_names": None, "calculation_success": None, "reason_of_error": None}
-        self.input_params = {"dir_path": None, "file_name": None, "input_result": None}
+        self.input_params = {"dir_path": None, "file_name": None, "distance": 0, "sound_speed": 0, "input_result": None}
 
         self.analyse_signal = CalculationFinishedSignal()
         self.analyse_signal.calculation_finished.connect(self.handle_end_of_calculation)
@@ -195,7 +195,16 @@ class MainWindow(QMainWindow):
                     self.analysing_params["reason_of_error"] = "value"
                     break
                 finally:
-                    self.make_button_available()
+                    if self.analysing_params["calculation_success"] == 0:
+                        self.make_button_available()
+
+        length_of_arrays = round(distance / sound_speed * 33600)
+
+        if self.analysing_params["calculation_success"] != 0:
+            if len(array_1) != length_of_arrays or len(array_2) != length_of_arrays:
+                self.analysing_params["calculation_success"] = 0
+                self.analysing_params["reason_of_error"] = "wrong_length"
+                self.make_button_available()
 
         if self.analysing_params["calculation_success"] != 0:
             self.analysing_params["calculation_success"] = 1
@@ -412,16 +421,10 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-weight: 600; color: #033E6B")
         self.input_screen_layout.addWidget(title, 0, 0, 1, 2)
 
-        labels = ["Номер COM-порта: ",  "Папка, куда будет записан файл: ", "Имя файла: ", "Время запуска: "]
+        labels = ["Папка, куда будет записан файл: ", "Имя файла: ", "Время запуска: ", "Расстояние между датчиками: ", "Скорость звука в трубе: "]
         for i in range(len(labels)):
             label = QLabel(labels[i])
             self.input_screen_layout.addWidget(label, i + 1, 0)
-
-        com_port_spinbox = QSpinBox()
-        com_port_spinbox.setObjectName("COMPortSpinbox")
-        com_port_spinbox.setMaximum(10000)
-        com_port_spinbox.setStyleSheet("background-color: white; max-width: 100px")
-        self.input_screen_layout.addWidget(com_port_spinbox, 1, 1)
 
         dir_choose_layout = QHBoxLayout()
         dir_choose_layout.setContentsMargins(0, 0, 0, 0)
@@ -440,7 +443,7 @@ class MainWindow(QMainWindow):
         dir_choose = QWidget()
         dir_choose.setMaximumWidth(200)
         dir_choose.setLayout(dir_choose_layout)
-        self.input_screen_layout.addWidget(dir_choose, 2, 1)
+        self.input_screen_layout.addWidget(dir_choose, 1, 1)
 
         self.add_file_name_input()
 
@@ -453,7 +456,7 @@ class MainWindow(QMainWindow):
         record_start_button.setToolTip("Заполните все поля")
         record_start_button.setDisabled(True)
         record_start_button.clicked.connect(self.show_confirmation_and_start_scheduling)
-        self.input_screen_layout.addWidget(record_start_button, 5, 0, 1, 2)
+        self.input_screen_layout.addWidget(record_start_button, 6, 0, 1, 2)
 
     def write_value(self, param, value):
         self.input_params[param] = value
@@ -492,28 +495,42 @@ class MainWindow(QMainWindow):
 
         file_name_widget = QWidget()
         file_name_widget.setLayout(file_name_layout)
-        self.input_screen_layout.addWidget(file_name_widget, 3, 1)
+        self.input_screen_layout.addWidget(file_name_widget, 2, 1)
 
     def add_spinboxes(self):
-        spinbox_names = ["startHour", "startMinute"]
-        suffixes = [" ч", " мин"]
-        max_values = [23, 59]
+        spinbox_names = ["startHour", "startMinute", "input_distance", "input_soundSpeed"]
+        suffixes = [" ч", " мин", " м", " м/с"]
+        max_values = [23, 59, 100000, 100000]
+
+        double_spin_boxes = []
 
         spinboxes_layout = QHBoxLayout()
         spinboxes_layout.setContentsMargins(0, 0, 0, 0)
 
         for i in range(len(spinbox_names)):
-            spinbox = QSpinBox()
-            spinbox.setStyleSheet("background-color: white")
+            if i < 2:
+                spinbox = QSpinBox()
+            else:
+                spinbox = QDoubleSpinBox()
+
+            spinbox.setStyleSheet("background-color: white; max-width: 150px")
             spinbox.setObjectName(spinbox_names[i])
-            spinbox.setMaximum(max_values[i])
             spinbox.setSuffix(suffixes[i])
-            
-            spinboxes_layout.addWidget(spinbox)
+            spinbox.setMaximum(max_values[i])   
+
+            if i < 2:         
+                spinboxes_layout.addWidget(spinbox)
+            else:
+                self.input_screen_layout.addWidget(spinbox, i + 2, 1)
+                double_spin_boxes.append(spinbox)
+
+        double_spin_boxes[0].valueChanged.connect(lambda value: self.write_value("distance", value))
+        double_spin_boxes[1].valueChanged.connect(lambda value: self.write_value("sound_speed", value))
 
         spinboxes_wrapper = QWidget()
         spinboxes_wrapper.setLayout(spinboxes_layout)
-        self.input_screen_layout.addWidget(spinboxes_wrapper, 4, 1, Qt.AlignmentFlag.AlignLeft)
+        self.input_screen_layout.addWidget(spinboxes_wrapper, 3, 1, Qt.AlignmentFlag.AlignLeft)
+
 
     def find_date(self, hours, minutes):
         now = datetime.datetime.now()
@@ -550,7 +567,7 @@ class MainWindow(QMainWindow):
     def change_state_of_start_button(self):
         values = [self.input_params[key] for key in self.input_params]
         record_start_button = self.findChild(QPushButton, "recordStartButton")
-        if all(values[:2]):
+        if all(values[:4]):
             record_start_button.setStyleSheet("""QPushButton {color: white; background-color: navy; font-weight: bold; max-width: 100px}""")
             record_start_button.setToolTip("")
             record_start_button.setDisabled(False)
@@ -561,23 +578,26 @@ class MainWindow(QMainWindow):
             record_start_button.setDisabled(True)
 
     def show_confirmation_and_start_scheduling(self):
-        com_port_number = self.findChild(QSpinBox, "COMPortSpinbox").value()
         start_hour = self.findChild(QSpinBox, "startHour").value()
         start_minute = self.findChild(QSpinBox, "startMinute").value()
 
         date_of_start = self.find_date(start_hour, start_minute)
         date_string = date_of_start.strftime("%d.%m.%y, %H:%M")
 
-        confirm_pop_up = self.create_confirm_pop_up({"com_port_number": com_port_number, "duration": 5, "date_string": date_string})
+        self.input_params["distance"] = self.findChild(QDoubleSpinBox, "input_distance").value()
+        self.input_params["sound_speed"] = self.findChild(QDoubleSpinBox, "input_soundSpeed").value()
+
+        confirm_pop_up = self.create_confirm_pop_up({"date_string": date_string})
 
         pool = ThreadPool(processes=1)
         input_params = self.input_params
         input_signal = self.input_signal
 
         def get_result_of_writing():
-            async_result = pool.apply_async(write_signals_in_file, [com_port_number, input_params["dir_path"], input_params["file_name"]])
+            async_result = pool.apply_async(write_signals_in_file, [input_params[key] for key in ["distance", "sound_speed"]] + [input_params["dir_path"] for i in range(2)] + [input_params["file_name"] + ".txt"] + [input_params["file_name"] + "_1.txt"])
             async_result.wait()
-            input_params["input_result"] = async_result.get()
+            a = async_result.get()
+            input_params["input_result"] = a
             input_signal.calculation_finished.emit()
 
         schedule = sched.scheduler(time.time, time.sleep)
@@ -589,8 +609,12 @@ class MainWindow(QMainWindow):
         result = confirm_pop_up.exec()
         if not result and self.input_params["input_result"] == None:
             pool.close()
-            schedule.cancel(event)
-            self.change_state_of_start_button()
+            try:
+                schedule.cancel(event)
+            except ValueError:
+                pass
+            finally:
+                self.change_state_of_start_button()
 
     def create_confirm_pop_up(self, params: dict):
         confirm_pop_up = QMessageBox(self)
@@ -600,10 +624,10 @@ class MainWindow(QMainWindow):
         confirm_pop_up.setStandardButtons(QMessageBox.StandardButton.Ok)
         confirm_pop_up.addButton("Отменить", QMessageBox.ButtonRole.RejectRole)
         confirm_pop_up.setText("Потвердите операцию записи:")
-        confirm_pop_up.setInformativeText(f"""<b>Номер COM-порта:</b> {params["com_port_number"]}<br />
-                                            <b>Продожительность записи :</b> {params["duration"]} сек<br />
-                                            <b>Имя файла:</b> {self.input_params["file_name"]}<br />
+        confirm_pop_up.setInformativeText(f"""<b>Имя файла:</b> {self.input_params["file_name"]}<br />
                                             <b>Папка, в которой будет находиться файл:</b> {self.input_params["dir_path"]}<br />
+                                            <b>Расстояние между датчиками:</b> {self.input_params["distance"]}<br />
+                                            <b>Скорость звука в трубе:</b> {self.input_params["sound_speed"]}<br />
                                             <b>Дата и время начала записи:</b> {params["date_string"]}<br />
                                             <i>(По наступлении этого времени запись начнётся автоматически, если Вы не закроете программу и не нажмёте кнопку "Отмена")</i>
                                           """)
@@ -623,8 +647,11 @@ class MainWindow(QMainWindow):
         self.dir_button.setStyleSheet("QPushButton {max-width: 120px; padding: 5px; color: white; background-color: navy; border: 0; font-weight: bold}")
         self.findChild(QLabel, "dirName").setText("Не выбрана")
 
-        for name in ["COMPortSpinbox", "startHour", "startMinute"]:
+        for name in ["startHour", "startMinute"]:
             self.findChild(QSpinBox, name).setValue(0)
+
+        for name in ["input_distance", "input_soundSpeed"]:
+            self.findChild(QDoubleSpinBox, name).setValue(0)
 
         self.findChild(QLineEdit, "fileName").setText("")
 
