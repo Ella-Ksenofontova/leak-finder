@@ -29,6 +29,8 @@ from pathlib import Path
 import datetime
 import time
 import sched
+from traceback import format_exc
+from sys import stderr
 
 from arduino_imitation import write_signals_in_file
 
@@ -94,7 +96,7 @@ class MainWindow(QMainWindow):
     def adjust_window_appereance(self):
         self.setWindowTitle("Работа с корреляционным течеискателем")
         self.setStyleSheet("background-color: whitesmoke")
-        self.setWindowIcon(QIcon("settings.png"))
+        self.setWindowIcon(QIcon("C:\\Users\\User\\PycharmProjects\\leakFinder\\settings.ico"))
 
     def add_tabs(self):
         input_screen = QWidget()
@@ -209,22 +211,20 @@ class MainWindow(QMainWindow):
 
         if self.analysing_params["calculation_success"] != 0:
             self.analysing_params["calculation_success"] = 1
-            
             try:
-                min_length = min(len(array_1), len(array_2))
-
-                array_1 = (ctypes.c_double * min_length)(*array_1[0:min_length])
-                array_2 = (ctypes.c_double * min_length)(*array_2[0:min_length])
-
+                array_1 = (ctypes.c_double * length_of_arrays)(*array_1)
+                array_2 = (ctypes.c_double * length_of_arrays)(*array_2)
                 result_ptr = lib.K(array_1, array_2, sound_speed, distance)
-                result_double_array = ctypes.cast(result_ptr, ctypes.POINTER(ctypes.c_double * min_length)).contents
-                result_array = list(result_double_array)
+                #result_double_array = ctypes.cast(result_ptr, ctypes.POINTER(ctypes.c_double * round(len(array_1) / 3.5))).contents
+                result_array = result_ptr[:round(len(array_1) / 3.5)]
                 result_distances = self.calculate_distances(result_array, distance, sound_speed)
+
                 self.change_canvas(result_array)
                 self.change_distances_labels(result_distances)
-            except OSError:
+            except:
                 self.analysing_params["calculation_success"] = 0
                 self.analysing_params["reason_of_error"] = "OS"
+                print(format_exc(10), file=stderr)
             finally:
                 self.make_button_available()
 
@@ -381,7 +381,7 @@ class MainWindow(QMainWindow):
 
 
     def open_files_and_record_names(self):
-         file_names = QFileDialog.getOpenFileNames(self, "Выбор файлов", str(Path.home()), filter="Текстовые файлы (*.txt)")
+         file_names = QFileDialog.getOpenFileNames(self, "Выбор файлов", "", filter="Текстовые файлы (*.txt)")
          if len(file_names[0]) > 1:
             self.analysing_params["file_names"] = file_names[0]
 

@@ -1,3 +1,8 @@
 .idea
 venv
 .vscode
+Project1
+__pycache__
+build
+dist
+*.txt
