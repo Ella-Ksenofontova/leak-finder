@@ -2,8 +2,6 @@
 from PyQt6.QtWidgets import QApplication, \
     QMainWindow, \
     QPushButton, \
-    QSpinBox, \
-    QDoubleSpinBox, \
     QLineEdit, \
     QLabel, \
     QWidget, \
@@ -14,7 +12,8 @@ from PyQt6.QtWidgets import QApplication, \
     QToolTip,\
     QFileDialog, \
     QMessageBox,\
-    QTabWidget
+    QTabWidget,\
+    QLayout
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QIcon, QFont
 
@@ -33,6 +32,7 @@ from traceback import format_exc
 from sys import stderr
 
 from arduino_imitation import write_signals_in_file
+from CustomSpinBox import CustomSpinBox
 
 matplotlib.use("Qt5Agg")
 
@@ -160,8 +160,8 @@ class MainWindow(QMainWindow):
             self.central_widget_layout.addWidget(label, i + 6, 0, 1, 2)
 
     def prepare_for_slow_calculations(self):
-        distance = self.central_widget.findChild(QDoubleSpinBox, "distanceSpinBox").value()
-        sound_speed = self.central_widget.findChild(QDoubleSpinBox, "soundSpeedSpinBox").value()
+        distance = self.central_widget.findChild(CustomSpinBox, "distanceSpinBox").value()
+        sound_speed = self.central_widget.findChild(CustomSpinBox, "soundSpeedSpinBox").value()
 
         calculation_button = self.central_widget.findChild(QPushButton, "calculationButton")
         calculation_button.setText("Загрузка...")
@@ -215,7 +215,6 @@ class MainWindow(QMainWindow):
                 array_1 = (ctypes.c_double * length_of_arrays)(*array_1)
                 array_2 = (ctypes.c_double * length_of_arrays)(*array_2)
                 result_ptr = lib.K(array_1, array_2, sound_speed, distance)
-                #result_double_array = ctypes.cast(result_ptr, ctypes.POINTER(ctypes.c_double * round(len(array_1) / 3.5))).contents
                 result_array = result_ptr[:round(len(array_1) / 3.5)]
                 result_distances = self.calculate_distances(result_array, distance, sound_speed)
 
@@ -259,7 +258,7 @@ class MainWindow(QMainWindow):
     def clear_all_inputs(self):
         identifiers = ["soundSpeedSpinBox", "distanceSpinBox"]
         for id in identifiers:
-            input = self.central_widget.findChild(QDoubleSpinBox, id)
+            input = self.central_widget.findChild(CustomSpinBox, id)
             input.setValue(0)
 
         material_combobox = self.central_widget.findChild(QComboBox, "materialCombobox")
@@ -318,7 +317,7 @@ class MainWindow(QMainWindow):
 
         for i in range(len(labels_texts)):
             label = QLabel(labels_texts[i])
-            label.setStyleSheet("font-size: 14px; width: 200px")
+            label.setStyleSheet("font-size: 14px; width: 200px;")
             self.central_widget_layout.addWidget(label, i + 2, 0, 1, 2)
 
     def add_inputs(self):
@@ -328,7 +327,7 @@ class MainWindow(QMainWindow):
         self.add_file_names_label()
 
         for i in range(2):
-            spinbox = QDoubleSpinBox()
+            spinbox = CustomSpinBox()
             spinbox.setObjectName(identifiers[i])
             spinbox.setStyleSheet("margin-right: 20px; min-width: 150px; max-width: 200px;"
                                   "background-color: white; font-size: 14px")
@@ -358,8 +357,8 @@ class MainWindow(QMainWindow):
         self.central_widget_layout.addWidget(file_names_label, 1, 1, 1, 2)        
 
     def check_spinboxes_values(self):
-        spinbox_with_sound_speed = self.central_widget.findChild(QDoubleSpinBox, "soundSpeedSpinBox")
-        spinbox_with_distance = self.central_widget.findChild(QDoubleSpinBox, "distanceSpinBox")
+        spinbox_with_sound_speed = self.central_widget.findChild(CustomSpinBox, "soundSpeedSpinBox")
+        spinbox_with_distance = self.central_widget.findChild(CustomSpinBox, "distanceSpinBox")
 
         return spinbox_with_sound_speed.value() > 0 and spinbox_with_distance.value() > 0
     
@@ -403,7 +402,7 @@ class MainWindow(QMainWindow):
         file_name_label.setText(file_names[0] + "; " + file_names[1])
 
     def change_sound_speed(self, material):
-        spinbox_with_sound_speed = self.central_widget.findChild(QDoubleSpinBox, "soundSpeedSpinBox")
+        spinbox_with_sound_speed = self.central_widget.findChild(CustomSpinBox, "soundSpeedSpinBox")
         if material in self.sound_speeds:
             spinbox_with_sound_speed.setValue(self.sound_speeds[material])
         else:
@@ -501,6 +500,7 @@ class MainWindow(QMainWindow):
     def add_spinboxes(self):
         spinbox_names = ["startHour", "startMinute", "input_distance", "input_soundSpeed"]
         suffixes = [" ч", " мин", " м", " м/с"]
+        properties = ["max-width: 100px", "max-width: 100px", "max-width: 150px", "max-width: 150px"]
         max_values = [23, 59, 100000, 100000]
 
         double_spin_boxes = []
@@ -510,11 +510,18 @@ class MainWindow(QMainWindow):
 
         for i in range(len(spinbox_names)):
             if i < 2:
-                spinbox = QSpinBox()
+                supports_double = False
             else:
-                spinbox = QDoubleSpinBox()
+                supports_double = True
+            spinbox = CustomSpinBox(supports_double=supports_double)
 
-            spinbox.setStyleSheet("background-color: white; max-width: 150px")
+            spinbox.setStyleSheet(f"background-color: white; padding: 0;")
+            prop = properties[i]
+            if prop.startswith("max"):
+                spinbox.setMaximumWidth(int(prop[prop.find(":") + 1:prop.find("px")].strip()))
+            else:
+                spinbox.setMinimumWidth(int(prop[prop.find(":") + 1:prop.find("px")].strip()))
+                
             spinbox.setObjectName(spinbox_names[i])
             spinbox.setSuffix(suffixes[i])
             spinbox.setMaximum(max_values[i])   
@@ -579,14 +586,14 @@ class MainWindow(QMainWindow):
             record_start_button.setDisabled(True)
 
     def show_confirmation_and_start_scheduling(self):
-        start_hour = self.findChild(QSpinBox, "startHour").value()
-        start_minute = self.findChild(QSpinBox, "startMinute").value()
+        start_hour = self.findChild(CustomSpinBox, "startHour").value()
+        start_minute = self.findChild(CustomSpinBox, "startMinute").value()
 
         date_of_start = self.find_date(start_hour, start_minute)
         date_string = date_of_start.strftime("%d.%m.%y, %H:%M")
 
-        self.input_params["distance"] = self.findChild(QDoubleSpinBox, "input_distance").value()
-        self.input_params["sound_speed"] = self.findChild(QDoubleSpinBox, "input_soundSpeed").value()
+        self.input_params["distance"] = self.findChild(CustomSpinBox, "input_distance").value()
+        self.input_params["sound_speed"] = self.findChild(CustomSpinBox, "input_soundSpeed").value()
 
         confirm_pop_up = self.create_confirm_pop_up({"date_string": date_string})
 
@@ -649,10 +656,10 @@ class MainWindow(QMainWindow):
         self.findChild(QLabel, "dirName").setText("Не выбрана")
 
         for name in ["startHour", "startMinute"]:
-            self.findChild(QSpinBox, name).setValue(0)
+            self.findChild(CustomSpinBox, name).setValue(0)
 
         for name in ["input_distance", "input_soundSpeed"]:
-            self.findChild(QDoubleSpinBox, name).setValue(0)
+            self.findChild(CustomSpinBox, name).setValue(0)
 
         self.findChild(QLineEdit, "fileName").setText("")
 
@@ -680,6 +687,7 @@ class MainWindow(QMainWindow):
         info_box.setStandardButtons(QMessageBox.StandardButton.Ok)
 
         info_box.exec()
+    
 
 class Canvas(FigureCanvas):
     def __init__(self) -> None:
@@ -691,5 +699,5 @@ app = QApplication([])
 
 window = MainWindow()
 window.show()
-
+        
 app.exec()

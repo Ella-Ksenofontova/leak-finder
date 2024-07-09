@@ -11,3 +11,4 @@
 
 ## Ссылки на авторов стороннего контента
 + [Ссылка на автора иконки приложения](https://www.flaticon.com/authors/freepik)
++ [Ссылка на автора иконки стрелочки](https://www.flaticon.com/authors/creatype)
