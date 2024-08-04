@@ -31,11 +31,11 @@ def write_signals_in_file(distance, sound_speed, first_dir_path, second_dir_path
 
     with open(first_dir_path + "/" + first_file_name, "w") as first_file:
         for i in array_1:
-            first_file.write(str(i // 1000) + "\n")
+            first_file.write(str(i // 100) + "\n")
 
     with open(second_dir_path + "/" + second_file_name, "w") as second_file:
         for i in array_2:
-            second_file.write(str(i // 1000) + "\n")
+            second_file.write(str(i // 100) + "\n")
 
     return 1
 
