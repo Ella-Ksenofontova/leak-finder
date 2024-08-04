@@ -501,7 +501,7 @@ class MainWindow(QMainWindow):
         spinbox_names = ["startHour", "startMinute", "input_distance", "input_soundSpeed"]
         suffixes = [" ч", " мин", " м", " м/с"]
         properties = ["max-width: 100px", "max-width: 100px", "max-width: 150px", "max-width: 150px"]
-        max_values = [23, 59, 100000, 100000]
+        max_values = [23, 59, 1000000, 1000000]
 
         double_spin_boxes = []
 
